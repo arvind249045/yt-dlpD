@@ -1,0 +1,195 @@
+{
+  "name": "Instagram Reels - Audio, Transcript and Shiprocket Analysis",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 300],
+      "id": "3db93df0-753a-4ae1-8ce1-796eed7f4501",
+      "name": "When clicking Execute workflow"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "58df16f8-9dfd-478a-b616-a98407c5374e", "name": "post_url", "value": "https://www.instagram.com/reel/REPLACE_ME/", "type": "string" },
+            { "id": "ce394ef7-739c-4be3-9209-bce5d704c043", "name": "page_handle", "value": "", "type": "string" },
+            { "id": "ed0d8c3f-530e-4708-b0fc-767b2ed86e26", "name": "caption", "value": "", "type": "string" },
+            { "id": "35caa585-3dad-4c57-879d-030dd215db57", "name": "posted_at", "value": "", "type": "string" },
+            { "id": "ae2b2e37-a0d5-4522-b001-39bd32f788b1", "name": "views", "value": 0, "type": "number" },
+            { "id": "cefd781f-836b-4828-b0a9-ea7cb3770894", "name": "likes", "value": 0, "type": "number" },
+            { "id": "9a33792c-3d18-4144-8f00-1c6d5d33d955", "name": "comments", "value": 0, "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 300],
+      "id": "bc62cb1f-f0de-4d05-a74e-4933ab9708bb",
+      "name": "Reels API - Replace This Node",
+      "notes": "Replace this node with the API that returns one item per Reel. Keep the field names shown here."
+    },
+    {
+      "parameters": { "batchSize": 1, "options": {} },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 300],
+      "id": "bf08de8e-01c8-4292-b07f-a37747da3e19",
+      "name": "Loop Over Reels"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://yt-dlp-api-production-e405.up.railway.app/v1/audio",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.INSTAGRAM_DOWNLOADER_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { url: $json.post_url || $json.url || $json.permalink } }}",
+        "options": {
+          "response": { "response": { "responseFormat": "file", "outputPropertyName": "data" } },
+          "timeout": 300000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [680, 400],
+      "id": "c461ea17-3055-42d3-9f9f-2a47eed63e65",
+      "name": "Download Reel as MP3",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.GROQ_API_KEY }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "data" },
+            { "name": "model", "value": "whisper-large-v3-turbo" },
+            { "name": "response_format", "value": "json" },
+            { "name": "temperature", "value": "0" }
+          ]
+        },
+        "options": { "timeout": 300000 }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [920, 400],
+      "id": "b9e79453-89ed-446c-879e-35d90640c27d",
+      "name": "Transcribe Audio with Groq",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Reel URL: {{ $('Loop Over Reels').item.json.post_url || $('Loop Over Reels').item.json.url || $('Loop Over Reels').item.json.permalink }}\nCaption: {{ $('Loop Over Reels').item.json.caption || '' }}\nTranscript:\n{{ $json.text }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are a content intelligence analyst evaluating Instagram Reels about ecommerce in India. Analyse only the supplied caption and transcript. Determine whether Shiprocket, including a clearly identifiable Shiprocket product or service, is directly promoted. A direct promotion requires an explicit recommendation, sales claim, benefit claim, product demonstration, call to action, offer, signup instruction, or persuasive endorsement. A passing factual mention is not direct promotion. Do not infer promotion merely because the creator is associated with Shiprocket. Distinguish hard sell, soft sell, integration mention, passing mention, and no mention. The reason must identify the exact evidence and where it appears. If there is no evidence, say so plainly. Keep the summary factual and concise. Return only the structured output required by the parser."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [1160, 400],
+      "id": "74878e55-28e1-4072-bfc4-a70d7fab69b4",
+      "name": "Analyse Reel Content"
+    },
+    {
+      "parameters": {
+        "model": { "__rl": true, "value": "gpt-5.4", "mode": "list", "cachedResultName": "gpt-5.4" },
+        "builtInTools": {},
+        "options": { "temperature": 0 }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [1160, 620],
+      "id": "83822b57-2d1b-486b-aac6-410de9870433",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": { "id": "u0V50sw2c0vYSDRF", "name": "Shiprocket" }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"content_summary\": { \"type\": \"string\" },\n    \"primary_topic\": { \"type\": \"string\" },\n    \"shiprocket_mentioned\": { \"type\": \"boolean\" },\n    \"shiprocket_directly_promoted\": { \"type\": \"boolean\" },\n    \"promotion_type\": { \"type\": \"string\", \"enum\": [\"hard_sell\", \"soft_sell\", \"integration_mention\", \"passing_mention\", \"none\"] },\n    \"reason\": { \"type\": \"string\" },\n    \"evidence\": { \"type\": \"string\" },\n    \"call_to_action\": { \"type\": \"string\" },\n    \"confidence\": { \"type\": \"number\", \"minimum\": 0, \"maximum\": 1 }\n  },\n  \"required\": [\"content_summary\", \"primary_topic\", \"shiprocket_mentioned\", \"shiprocket_directly_promoted\", \"promotion_type\", \"reason\", \"evidence\", \"call_to_action\", \"confidence\"]\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [1360, 620],
+      "id": "cffd7534-f719-43e5-a0cc-87884057fc9f",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "c164f334-38d0-41fc-ac7b-f70965b88291", "name": "post_url", "value": "={{ $('Loop Over Reels').item.json.post_url || $('Loop Over Reels').item.json.url || $('Loop Over Reels').item.json.permalink }}", "type": "string" },
+            { "id": "972edafa-a16d-4023-91de-9dde64090f1b", "name": "page_handle", "value": "={{ $('Loop Over Reels').item.json.page_handle || $('Loop Over Reels').item.json.owner_username || '' }}", "type": "string" },
+            { "id": "2fb78bea-8141-485f-947a-5d0a626ddfcc", "name": "caption", "value": "={{ $('Loop Over Reels').item.json.caption || '' }}", "type": "string" },
+            { "id": "68c7c191-81c1-40b1-a358-e25ff0cd0bb3", "name": "posted_at", "value": "={{ $('Loop Over Reels').item.json.posted_at || $('Loop Over Reels').item.json.timestamp || '' }}", "type": "string" },
+            { "id": "c8b09577-c198-4f2c-87e8-0807096acb3e", "name": "views", "value": "={{ Number($('Loop Over Reels').item.json.views || $('Loop Over Reels').item.json.view_count || 0) }}", "type": "number" },
+            { "id": "68af5da9-c047-40f5-acbe-b9f73d52ae9b", "name": "likes", "value": "={{ Number($('Loop Over Reels').item.json.likes || $('Loop Over Reels').item.json.like_count || 0) }}", "type": "number" },
+            { "id": "fd8d205e-a366-49c0-9c2e-13fec0687294", "name": "comments", "value": "={{ Number($('Loop Over Reels').item.json.comments || $('Loop Over Reels').item.json.comment_count || 0) }}", "type": "number" },
+            { "id": "7910b824-50ab-4bf4-b813-abdf43f9366e", "name": "engagement_rate_percent", "value": "={{ (() => { const v = Number($('Loop Over Reels').item.json.views || $('Loop Over Reels').item.json.view_count || 0); const l = Number($('Loop Over Reels').item.json.likes || $('Loop Over Reels').item.json.like_count || 0); const c = Number($('Loop Over Reels').item.json.comments || $('Loop Over Reels').item.json.comment_count || 0); return v > 0 ? Math.round(((l + c) / v) * 10000) / 100 : 0; })() }}", "type": "number" },
+            { "id": "3be5f9ea-7b75-4ae7-b29a-7611442b3ef4", "name": "transcript", "value": "={{ $('Transcribe Audio with Groq').item.json.text || '' }}", "type": "string" },
+            { "id": "cd263fa6-8e19-411d-a673-56fcbbe8b130", "name": "content_summary", "value": "={{ $json.output.content_summary }}", "type": "string" },
+            { "id": "efb68677-65b9-4f37-ab42-c456518572d3", "name": "primary_topic", "value": "={{ $json.output.primary_topic }}", "type": "string" },
+            { "id": "f659bf6f-22c0-4681-a221-23481dca3207", "name": "shiprocket_mentioned", "value": "={{ $json.output.shiprocket_mentioned }}", "type": "boolean" },
+            { "id": "44e53bfe-05a6-4669-8034-1d2453759353", "name": "shiprocket_directly_promoted", "value": "={{ $json.output.shiprocket_directly_promoted }}", "type": "boolean" },
+            { "id": "54e9fc62-ed83-4235-b24d-c0ea88e718b6", "name": "promotion_type", "value": "={{ $json.output.promotion_type }}", "type": "string" },
+            { "id": "4a43d7d4-33a1-4d14-9950-300ea5a60889", "name": "reason", "value": "={{ $json.output.reason }}", "type": "string" },
+            { "id": "8cb66312-10eb-4e69-962c-36022d80e45b", "name": "evidence", "value": "={{ $json.output.evidence }}", "type": "string" },
+            { "id": "367cd911-9d87-45c2-93ec-49b72c1cf0e6", "name": "call_to_action", "value": "={{ $json.output.call_to_action }}", "type": "string" },
+            { "id": "ce886f91-f827-4c89-80de-8ffdb96846b6", "name": "confidence", "value": "={{ $json.output.confidence }}", "type": "number" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1420, 400],
+      "id": "c6f66a01-2cc8-49d5-9f96-6e21fce979ad",
+      "name": "Prepare Database Row",
+      "notes": "Connect this node to Google Sheets, Airtable, Postgres, Supabase, or your database node."
+    }
+  ],
+  "connections": {
+    "When clicking Execute workflow": { "main": [[{ "node": "Reels API - Replace This Node", "type": "main", "index": 0 }]] },
+    "Reels API - Replace This Node": { "main": [[{ "node": "Loop Over Reels", "type": "main", "index": 0 }]] },
+    "Loop Over Reels": { "main": [[], [{ "node": "Download Reel as MP3", "type": "main", "index": 0 }]] },
+    "Download Reel as MP3": {
+      "main": [
+        [{ "node": "Transcribe Audio with Groq", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Reels", "type": "main", "index": 0 }]
+      ]
+    },
+    "Transcribe Audio with Groq": {
+      "main": [
+        [{ "node": "Analyse Reel Content", "type": "main", "index": 0 }],
+        [{ "node": "Loop Over Reels", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "Analyse Reel Content", "type": "ai_languageModel", "index": 0 }]] },
+    "Structured Output Parser": { "ai_outputParser": [[{ "node": "Analyse Reel Content", "type": "ai_outputParser", "index": 0 }]] },
+    "Analyse Reel Content": { "main": [[{ "node": "Prepare Database Row", "type": "main", "index": 0 }]] },
+    "Prepare Database Row": { "main": [[{ "node": "Loop Over Reels", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": true }
+}

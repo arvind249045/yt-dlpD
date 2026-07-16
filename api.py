@@ -8,6 +8,7 @@ import secrets
 import subprocess
 import tempfile
 import threading
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -158,6 +159,14 @@ def run_download(job_id: str, payload: DownloadRequest) -> None:
             save_job(JOBS[job_id])
 
 
+def cookie_args() -> list[str]:
+    if COOKIE_FILE:
+        return ["--cookies", str(COOKIE_FILE)]
+    if COOKIE_BROWSER:
+        return ["--cookies-from-browser", COOKIE_BROWSER]
+    return []
+
+
 @app.on_event("startup")
 def load_jobs() -> None:
     global COOKIE_FILE
@@ -184,7 +193,36 @@ def load_jobs() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"ok": True, "service": "instagram-yt-dlp-api"}
+    return {"ok": True, "service": "instagram-yt-dlp-api", "cookies_configured": bool(COOKIE_FILE or COOKIE_BROWSER)}
+
+
+@app.post("/v1/audio", dependencies=[Depends(require_key)])
+def get_audio(payload: DownloadRequest, background_tasks: BackgroundTasks):
+    urls = payload.urls or ([payload.url] if payload.url else [])
+    if len(urls) != 1:
+        raise HTTPException(422, "The direct audio endpoint accepts exactly one URL")
+    temp_root = DOWNLOAD_ROOT / "_temp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="audio-", dir=temp_root))
+    log_path = work_dir / "yt-dlp.log"
+    cmd = [
+        os.sys.executable, "-m", "yt_dlp", urls[0],
+        "--no-playlist", "--restrict-filenames", "--write-info-json",
+        "--output", str(work_dir / "%(id)s.%(ext)s"),
+        "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0",
+        "--max-filesize", "250M", "--ffmpeg-location", imageio_ffmpeg.get_ffmpeg_exe(),
+        *cookie_args(),
+    ]
+    with log_path.open("w", encoding="utf-8") as log:
+        result = subprocess.run(cmd, cwd=BASE_DIR, stdout=log, stderr=subprocess.STDOUT, text=True)
+    audio_files = list(work_dir.glob("*.mp3"))
+    if result.returncode != 0 or not audio_files:
+        detail = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise HTTPException(502, f"yt-dlp could not produce audio: {detail}")
+    audio = audio_files[0]
+    background_tasks.add_task(shutil.rmtree, work_dir, True)
+    return FileResponse(audio, media_type="audio/mpeg", filename=audio.name)
 
 
 @app.post("/v1/jobs", status_code=202, dependencies=[Depends(require_key)])
