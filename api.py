@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
 import secrets
 import subprocess
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,8 @@ DOWNLOAD_ROOT = (BASE_DIR / os.getenv("DOWNLOAD_ROOT", "downloads")).resolve()
 DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 API_KEY = os.getenv("API_KEY", "")
 COOKIE_BROWSER = os.getenv("COOKIE_BROWSER", "").strip()
+COOKIES_B64 = os.getenv("COOKIES_B64", "").strip()
+COOKIE_FILE: Path | None = None
 ALLOWED_HOSTS = {"instagram.com", "www.instagram.com", "m.instagram.com"}
 JOBS: dict[str, dict] = {}
 LOCK = threading.Lock()
@@ -123,7 +127,9 @@ def run_download(job_id: str, payload: DownloadRequest) -> None:
         "--sleep-requests", "1", "--sleep-interval", "2", "--max-sleep-interval", "5",
         "--ffmpeg-location", imageio_ffmpeg.get_ffmpeg_exe(),
     ]
-    if COOKIE_BROWSER:
+    if COOKIE_FILE:
+        cmd.extend(["--cookies", str(COOKIE_FILE)])
+    elif COOKIE_BROWSER:
         cmd.extend(["--cookies-from-browser", COOKIE_BROWSER])
     if payload.max_items:
         cmd.extend(["--playlist-end", str(payload.max_items)])
@@ -154,6 +160,18 @@ def run_download(job_id: str, payload: DownloadRequest) -> None:
 
 @app.on_event("startup")
 def load_jobs() -> None:
+    global COOKIE_FILE
+    if COOKIES_B64:
+        try:
+            cookie_bytes = base64.b64decode(COOKIES_B64, validate=True)
+            cookie_text = cookie_bytes.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise RuntimeError("COOKIES_B64 is not valid UTF-8 base64") from exc
+        if not cookie_text.startswith(("# Netscape HTTP Cookie File", "# HTTP Cookie File")):
+            raise RuntimeError("COOKIES_B64 does not contain a Netscape cookie file")
+        COOKIE_FILE = Path(tempfile.gettempdir()) / "instagram-cookies.txt"
+        COOKIE_FILE.write_text(cookie_text, encoding="utf-8", newline="\n")
+        COOKIE_FILE.chmod(0o600)
     for path in DOWNLOAD_ROOT.glob("*/job.json"):
         try:
             job = json.loads(path.read_text(encoding="utf-8"))

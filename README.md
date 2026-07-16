@@ -58,8 +58,10 @@ Only use this with content you are authorized to access. Instagram may rate-limi
 Deploy this directory as a Docker service, then configure:
 
 - Variable `API_KEY`: a long random secret
+- Variable `COOKIES_B64`: base64 of a fresh Netscape cookie file; seal this variable
 - Variable `DOWNLOAD_ROOT`: `/data`
+- Variable `RAILWAY_RUN_UID`: `0` (required because Railway mounts volumes as root)
 - Persistent volume mounted at `/data`
 - Public domain generated for the service
 
-Use the generated HTTPS domain in n8n. A hosted server cannot read cookies from a browser on your PC, so `COOKIE_BROWSER` must remain empty there. Authenticated Instagram access would require a separately provisioned cookie file or session mechanism and careful secret handling.
+Use the generated HTTPS domain in n8n. A hosted server cannot read cookies from a browser on your PC, so `COOKIE_BROWSER` must remain empty there. Convert a freshly exported cookie file to base64 locally and store it as `COOKIES_B64`; base64 is not encryption, so use Railway's **Seal** option and rotate the Instagram session if the value is ever exposed.
