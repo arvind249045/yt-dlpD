@@ -6,3 +6,5 @@ runtime/
 __pycache__/
 *.pyc
 .railway-api-key.local
+.instagram-cookies.local.txt
+instagram-reels-analysis-workflow.n8n-import.json
